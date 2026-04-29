@@ -1,0 +1,53 @@
+services:
+  # Spark Master
+  spark-master:
+    image: spark:latest
+    container_name: spark-master
+    ports:
+      - "8080:8080" # Spark Web UI
+      - "7077:7077" # Spark Master port
+    environment:
+      - SPARK_MODE=master
+    networks:
+      - spark-network
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:latest
+    container_name: postgres-db
+    environment:
+      - POSTGRES_PASSWORD=POSTGRES_PASSWORD
+    ports:
+      - "55432:5432" # PostgreSQL port
+    volumes:
+      - ./data:/data
+    networks:
+      - spark-network
+
+  # Jupyter Notebook
+  jupyter:
+    image: jupyter/pyspark-notebook:latest
+    container_name: jupyter-notebook
+    ports:
+      - "8888:8888" # Jupyter Notebook port
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - GRANT_SUDO=yes
+      - NB_USER=jovyan
+    command: >
+      bash -c "pip install psycopg2-binary sqlalchemy && start-notebook.sh --NotebookApp.token='' --ServerApp.allow_password_change=False"
+    # command: >
+    #   start-notebook.sh --NotebookApp.token='' --ServerApp.allow_password_change=False
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./data:/home/jovyan/data
+      - ./jars:/home/jovyan/jars
+    depends_on:
+      - spark-master
+      - postgres
+    networks:
+      - spark-network
+
+networks:
+  spark-network:
+    driver: bridge
