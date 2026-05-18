@@ -16,8 +16,63 @@ services:
     networks:
       - spark-network
 
+  db-init:
+    image: postgres:latest
+    container_name: db-init
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: POSTGRES_PASSWORD
+    volumes:
+      - ./sql:/sql
+    command: >
+      bash -c "
+        echo 'Waiting for PostgreSQL...';
+        until pg_isready -h postgres -U postgres; do sleep 2; done;
+        echo 'PostgreSQL ready, executing ddl.sql';
+        psql -h postgres -U postgres -d postgres -f /sql/ddl.sql;
+        echo 'DDL executed successfully';
+      "
+    networks:
+      - spark-network
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse-db
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    environment:
+      CLICKHOUSE_PASSWORD: clickhouse123
+    networks:
+      - spark-network
+
+  clickhouse-init:
+    image: clickhouse/clickhouse-server:latest
+    container_name: clickhouse-init
+    depends_on:
+      clickhouse:
+        condition: service_started
+    volumes:
+      - ./sql:/sql
+    environment:
+      CLICKHOUSE_PASSWORD: clickhouse123
+    entrypoint: |
+      bash -c "
+        echo 'Waiting for ClickHouse...';
+        for i in {1..30}; do
+          clickhouse-client --host clickhouse --password 'clickhouse123' --query 'SELECT 1' && break || sleep 2;
+        done;
+        echo 'ClickHouse ready, creating tables...';
+        clickhouse-client --host clickhouse --password 'clickhouse123' --multiquery < /sql/clickhouse_ddl.sql;
+        echo 'ClickHouse tables created successfully';
+      "
+    networks:
+      - spark-network
+
   jupyter:
-    image: jupyter/pyspark-notebook:latest
+    build: .
     container_name: jupyter-notebook
     ports:
       - "8888:8888"
@@ -25,15 +80,15 @@ services:
       - JUPYTER_ENABLE_LAB=yes
       - GRANT_SUDO=yes
       - NB_USER=jovyan
-    command: >
-      bash -c "pip install psycopg2-binary sqlalchemy && start-notebook.sh --NotebookApp.token='' --ServerApp.allow_password_change=False"
     volumes:
       - ./notebooks:/home/jovyan/work
       - ./data:/home/jovyan/data
       - ./jars:/home/jovyan/jars
     depends_on:
-      postgres:
-        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
+      clickhouse-init:
+        condition: service_completed_successfully
     networks:
       - spark-network
 
